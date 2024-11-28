@@ -39,6 +39,7 @@ bool g_isMouseDragging = false;
 // Shader programs
 ///////////////////////////////////////////////////////////////////////////////
 GLuint backgroundProgram, shaderProgram, postFxShader;
+GLuint verticalBlurShader = 0, horizontalBlurShader = 0, cutoffShader = 0;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -142,6 +143,14 @@ struct FboInfo
 		// Task 1
 		//...
 
+		glGenFramebuffers(1, &framebufferId);
+		glBindFramebuffer(GL_FRAMEBUFFER, framebufferId);
+		// bind the texture as color attachment 0 (to the currently bound framebuffer)
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTextureTarget, 0);
+		glDrawBuffer(GL_COLOR_ATTACHMENT0);
+		// bind the texture as depth attachment (to the currently bound framebuffer)
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthBuffer, 0);
+
 		// check if framebuffer is complete
 		isComplete = checkFramebufferComplete();
 
@@ -214,6 +223,12 @@ void initialize()
 	                                             "../lab5-rendertotexture/shading.frag");
 	postFxShader = labhelper::loadShaderProgram("../lab5-rendertotexture/postFx.vert",
 	                                            "../lab5-rendertotexture/postFx.frag");
+	horizontalBlurShader = labhelper::loadShaderProgram("../lab5-rendertotexture/postFx.vert",
+		"../lab5-rendertotexture/horizontal_blur.frag");
+	verticalBlurShader = labhelper::loadShaderProgram("../lab5-rendertotexture/postFx.vert",
+		"../lab5-rendertotexture/vertical_blur.frag");
+	cutoffShader = labhelper::loadShaderProgram("../lab5-rendertotexture/postFx.vert",
+		"../lab5-rendertotexture/cutoff.frag");
 
 	///////////////////////////////////////////////////////////////////////////
 	// Load environment map
@@ -240,6 +255,10 @@ void initialize()
 	///////////////////////////////////////////////////////////////////////////
 	int w, h;
 	SDL_GetWindowSize(g_window, &w, &h);
+	const int numFbos = 5;
+	for (int i = 0; i < numFbos; i++) {
+		fboList.push_back(FboInfo(w, h));
+	}
 }
 
 
@@ -345,20 +364,32 @@ void display()
 	///////////////////////////////////////////////////////////////////////////
 	// Task 2
 	// ...
+	FboInfo& securityFB = fboList[0];
+	glBindFramebuffer(GL_FRAMEBUFFER, securityFB.framebufferId);
+	glViewport(0, 0, securityFB.width, securityFB.height);
+	glClearColor(0.2, 0.2, 0.8, 1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	drawScene(securityCamViewMatrix, securityCamProjectionMatrix);
+
+	labhelper::Material& screen = landingpadModel->m_materials[8];
+	screen.m_emission_texture.gl_id = securityFB.colorTextureTarget;
+
 
 	///////////////////////////////////////////////////////////////////////////
 	// draw scene from camera
 	///////////////////////////////////////////////////////////////////////////
-	glBindFramebuffer(GL_FRAMEBUFFER, 0); // to be replaced with another framebuffer when doing post processing
+	FboInfo& cameraFB = fboList[1];
+	glBindFramebuffer(GL_FRAMEBUFFER, cameraFB.framebufferId); // to be replaced with another framebuffer when doing post processing
 	glViewport(0, 0, w, h);
 	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	
 	drawScene(viewMatrix, projectionMatrix); // using both shaderProgram and backgroundProgram
 
 	// camera (obj-model)
 	drawCamera(securityCamViewMatrix, viewMatrix, projectionMatrix);
-
 	///////////////////////////////////////////////////////////////////////////
 	// Post processing pass(es)
 	///////////////////////////////////////////////////////////////////////////
@@ -368,7 +399,24 @@ void display()
 	// 3. Bind the framebuffer to texture unit 0
 	// 4. Draw a quad over the entire viewport
 
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, w, h);
+	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	
+
+	glUseProgram(postFxShader);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, cameraFB.colorTextureTarget);
+
+	labhelper::setUniformSlow(postFxShader, "time", currentTime);
+	labhelper::setUniformSlow(postFxShader, "currentEffect", currentEffect);
+	labhelper::setUniformSlow(postFxShader, "filterSize", filterSizes[filterSize - 1]);
+
+	labhelper::drawFullScreenQuad();
+
 	// Task 4: Set the required uniforms
+
 
 	glUseProgram(0);
 
